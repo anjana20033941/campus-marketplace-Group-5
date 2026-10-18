@@ -1,41 +1,54 @@
-# Campus Marketplace
+---
 
-Expo SDK 57 React Native app for buying and selling items within a campus community.
+# ⭐ Member 3: Buyer-Verified Condition Rating System
+> **Branch Name:** `feature/condition--rating` (feature/condition-rating`)
 
-## Run locally
+```markdown
+# Campus Marketplace — Buyer-Verified Condition Rating System
 
-Expo SDK 57 requires Node 22.13 or newer.
+> **Branch:** `feature/condition--rating`  
+> **Team:** Group 5  
+> **Framework:** Expo SDK 57 (React Native / TypeScript / Firebase)
 
-```bash
-cp .env.example .env
-npm install
-npm run web
-```
+An interactive campus marketplace application equipped with a **Buyer-Verified Condition Rating** system to promote transparency and trust in peer-to-peer campus trades.
 
-The app runs in demo mode until Firebase values are added to `.env`.
+---
 
-## Firebase setup
+## 🌟 Feature Spotlight: Buyer-Verified Condition Rating
 
-1. Create a Firebase project and register a Web app.
-2. Enable Google Authentication under Authentication > Sign-in method. Anonymous Authentication remains available for native fallback.
-3. Create a Cloud Firestore database.
-4. Copy the Web app configuration into `.env` using `.env.example`.
-5. Deploy `firestore.rules` with the Firebase CLI or paste them into the Firestore Rules tab.
+Rather than relying solely on a seller's self-reported claim (e.g. claiming an item is "Like new"), campus buyers who inspect or receive products can submit ratings (1 to 5 stars) and detailed condition feedback based on actual received quality.
 
-The app uses:
+### Key Capabilities
 
-- `listings`: public reads, authenticated seller-owned creates and edits.
-- `users/{uid}` and `users/{uid}/saved/{listingId}`: owner-only access.
-- `conversations`: members-only access, with messages in a subcollection.
+- **⭐ 1 to 5 Star Rating System:** Interactive star picker for reviews and weighted average rating calculation.
+- **🏷️ Received Condition Accuracy Assessment:**
+  - Evaluates whether the product received was:
+    - *As Claimed*
+    - *Better than Expected*
+    - *Slightly Worn*
+    - *Heavily Worn*
+- **📈 Condition Accuracy Percentage:** Displays transparency metrics (e.g., *"100% Condition Accuracy"*) to build student trust.
+- **🟡 Listing Card Rating Pills:** Clean amber badge (`⭐ 4.5 (2)`) displayed directly on the Explore feed cards.
+- **📝 Community Reviews Section:** Embedded verified reviews section inside product details with a **"+ Rate Condition"** modal.
 
-The client Firebase configuration is intentionally public. Access control belongs in Authentication, Firestore Rules, and App Check; never put Admin SDK credentials in this app.
+---
 
-## Current product flows
+## 🏗 Modular Architecture
 
-- Explore listings with search and category filters.
-- Browse and search without signing in; Google sign-in is required to contact sellers or publish listings.
-- Save and unsave listings.
-- Open a listing detail view and start a seller conversation.
-- Publish a basic listing through the Sell flow.
-- Sign in anonymously for a frictionless student account.
-- View Saved, Messages, and Profile pages.
+```text
+src/
+├── features/
+│   └── condition-rating/
+│       ├── components/
+│       │   ├── ConditionRatingBadge.tsx    # Compact rating pill (⭐ 4.5 (2)) on ListingCard
+│       │   ├── ConditionReviewsSection.tsx # Review feed & condition accuracy progress bar
+│       │   ├── RateConditionModal.tsx      # Buyer review submission modal
+│       │   └── StarRating.tsx              # Reusable interactive & display star component
+│       ├── services/
+│       │   └── conditionRatingService.ts   # Firestore review persistence & rating calculations
+│       ├── types.ts                        # TypeScript interfaces (ConditionRating, ListingRatingSummary)
+│       ├── index.ts                        # Barrel export
+│       └── README.md                       # Technical documentation
+├── components/
+│   └── ListingCard.tsx                     # Integrated rating badge on feed cards
+└── App.tsx                                 # Integrated reviews inside listing details modal
