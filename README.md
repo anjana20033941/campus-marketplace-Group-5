@@ -1,18 +1,57 @@
-# Condition Filter & Enhanced Filtering Feature (`src/features/condition-filter`)
+---
 
-This module implements **Condition Filtering & Enhanced Category Search** for the Campus Marketplace project.
+# 🔍 Member 4: Condition & Category Filter
+> **Branch Name:** `feature/condition-filter`
 
-## Feature Overview
+```markdown
+# Campus Marketplace — Condition & Category Filter Feature
 
-- **Condition Filter Bar**: Enables users to filter listings by item condition: `All conditions`, `Brand new`, `Like new`, `Good condition`, and `Fair condition`.
-- **Condition Tags**: Color-coded condition pill badges rendered across `ListingCard` and `ListingModal`.
-- **Multi-Facet Search**: Simultaneously filters by Category + Condition + Search Query.
+> **Branch:** `feature/condition-filter`  
+> **Team:** Group 5  
+> **Framework:** Expo SDK 57 (React Native / TypeScript / Firebase)
 
-## File Structure
+An interactive campus marketplace application featuring **Condition Filtering and Multi-Facet Search** to help students quickly locate items by quality and category.
 
-- `types.ts`: TypeScript contracts for `ItemCondition` and `FilterState`.
-- `constants.ts`: Available conditions and condition color palette.
-- `components/ConditionTag.tsx`: Styled condition badge.
-- `components/ConditionFilterBar.tsx`: Scrollable chip filter bar for selecting condition.
-- `services/filterService.ts`: Filter engine combining search text, category, and condition.
-- `index.ts`: Barrel export.
+---
+
+## 🌟 Feature Spotlight: Condition & Multi-Facet Filtering
+
+Students looking for items often have specific condition criteria (e.g. looking only for cheap *Used / Good condition* items, or wanting pristine *Brand new* textbooks). This feature introduces dedicated condition filtering alongside category and text search.
+
+### Key Capabilities
+
+- **🏷️ Horizontal Condition Filter Bar:**
+  - One-tap pill selection:
+    - `All conditions`
+    - `Brand new`
+    - `Like new`
+    - `Good condition`
+    - `Fair condition`
+- **🎨 Visual Condition Tags:** Color-coded condition badges displayed on listings and detail views.
+- **⚡ Real-Time Multi-Facet Search Engine:**
+  - Seamlessly combines:
+    - **Category Selection** (*Textbooks, Tech, Furniture, Fashion*)
+    - **Condition Selection** (*Brand new, Like new, etc.*)
+    - **Search Text Query** (title & description matching)
+  - Results update instantly without reloading the page.
+
+---
+
+## 🏗 Modular Architecture
+
+```text
+src/
+├── features/
+│   └── condition-filter/
+│       ├── components/
+│       │   ├── ConditionFilterBar.tsx  # Horizontal scrollable condition pill bar
+│       │   └── ConditionTag.tsx        # Color-coded condition pill tag
+│       ├── services/
+│       │   └── filterService.ts        # Multi-facet filtering engine (category + condition + query)
+│       ├── constants.ts                # Available conditions & color theme configurations
+│       ├── types.ts                    # TypeScript types (ItemCondition, FilterState)
+│       ├── index.ts                    # Barrel export
+│       └── README.md                   # Feature documentation
+├── pages/
+│   └── ExplorePage.tsx                 # ConditionFilterBar rendering & filter state handling
+└── App.tsx                             # Multi-filter pipeline binding
