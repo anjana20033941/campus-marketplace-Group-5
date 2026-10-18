@@ -1,41 +1,50 @@
-# Campus Marketplace
+# Campus Marketplace — Customer Support Chatbot Feature
 
-Expo SDK 57 React Native app for buying and selling items within a campus community.
+> **Branch:** `customer_support-chatbot`  
+> **Team:** Group 5  
+> **Framework:** Expo SDK 57 (React Native / TypeScript / Firebase)
 
-## Run locally
+An interactive campus marketplace application designed for university students to buy, sell, rent, and borrow items with a built-in instant **Customer Support Chatbot**.
 
-Expo SDK 57 requires Node 22.13 or newer.
+---
 
-```bash
-cp .env.example .env
-npm install
-npm run web
-```
+## 🌟 Feature Spotlight: Customer Support Chatbot
 
-The app runs in demo mode until Firebase values are added to `.env`.
+To ensure students can easily navigate the marketplace, search for items, and learn how to list or rent products, this branch introduces an integrated, rule-based **Customer Support Chatbot**.
 
-## Firebase setup
+### Key Capabilities
 
-1. Create a Firebase project and register a Web app.
-2. Enable Google Authentication under Authentication > Sign-in method. Anonymous Authentication remains available for native fallback.
-3. Create a Cloud Firestore database.
-4. Copy the Web app configuration into `.env` using `.env.example`.
-5. Deploy `firestore.rules` with the Firebase CLI or paste them into the Firestore Rules tab.
+- **⚡ Instant, Deterministic Responses:** Operates on an intelligent FAQ rule-engine with keyword & intent matching for 100% reliable, instant responses.
+- **🔑 Zero External API Key Dependency:** Completely free, offline-ready, and requires no paid third-party AI keys (OpenAI / Gemini / Anthropic).
+- **💬 Clean Chat Interface:**
+  - Distinct message bubbles (left-aligned assistant bubbles in soft mint, right-aligned student bubbles in brand dark green).
+  - Timestamps, sender labels, and typing indicator simulation.
+- **💡 Welcome Message & Quick-Reply Chips:**
+  - Displays interactive suggestion chips on start:
+    - *"🔍 How do I search for items?"*
+    - *"🏷️ How do I sell an item?"*
+    - *"🤝 How does Rent & Borrow work?"*
+    - *"📦 Browse Categories"*
+    - *"🔒 Campus Safety & Rules"*
+- **📊 Real Marketplace Data Integration:** References real active categories and listings dynamically from the app data.
+- **🛡️ Isolated & Safe:** Does not modify or disrupt existing peer-to-peer buyer-seller messaging (`MessagesPage.tsx`).
 
-The app uses:
+---
 
-- `listings`: public reads, authenticated seller-owned creates and edits.
-- `users/{uid}` and `users/{uid}/saved/{listingId}`: owner-only access.
-- `conversations`: members-only access, with messages in a subcollection.
+## 🏗 Modular Architecture
 
-The client Firebase configuration is intentionally public. Access control belongs in Authentication, Firestore Rules, and App Check; never put Admin SDK credentials in this app.
+The chatbot feature is built as an independent modular package (`src/features/support-chatbot/`):
 
-## Current product flows
-
-- Explore listings with search and category filters.
-- Browse and search without signing in; Google sign-in is required to contact sellers or publish listings.
-- Save and unsave listings.
-- Open a listing detail view and start a seller conversation.
-- Publish a basic listing through the Sell flow.
-- Sign in anonymously for a frictionless student account.
-- View Saved, Messages, and Profile pages.
+```text
+src/
+├── features/
+│   └── support-chatbot/
+│       ├── components/
+│       │   ├── SupportChatButton.tsx   # Floating pill button (🤖 Need Help? Chat with Bot ›)
+│       │   ├── SupportChatModal.tsx    # Slide-up modal container
+│       │   └── SupportChatScreen.tsx   # Full chat UI with message list, quick replies, & input
+│       ├── knowledgeBase.ts            # Intent matcher, FAQ knowledge base, and automated answers
+│       ├── types.ts                    # TypeScript types (ChatMessage, QuickReplyOption)
+│       ├── index.ts                    # Public barrel export
+│       └── README.md                   # Feature documentation
+├── App.tsx                             # Global launcher button & modal state management
