@@ -1,9 +1,3 @@
----
-
-# ⭐ Member 3: Buyer-Verified Condition Rating System
-> **Branch Name:** `feature/condition--rating` (feature/condition-rating`)
-
-```markdown
 # Campus Marketplace — Buyer-Verified Condition Rating System
 
 > **Branch:** `feature/condition--rating`  
