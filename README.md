@@ -1,8 +1,3 @@
----
-
-# 🔍 Member 4: Condition & Category Filter
-> **Branch Name:** `feature/condition-filter`
-
 ```markdown
 # Campus Marketplace — Condition & Category Filter Feature
 
