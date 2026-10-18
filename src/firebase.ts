@@ -1,6 +1,10 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { collection, doc, getFirestore } from "firebase/firestore";
+import { getAuth, initializeAuth } from "firebase/auth";
+// @ts-ignore
+import { getReactNativePersistence } from "firebase/auth";
+import { collection, doc, getFirestore, initializeFirestore } from "firebase/firestore";
+import { Platform } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
@@ -17,9 +21,39 @@ export const firebaseApp = firebaseConfigured
     ? getApp()
     : initializeApp(firebaseConfig)
   : null;
-export const auth = firebaseApp ? getAuth(firebaseApp) : null;
-export const db = firebaseApp ? getFirestore(firebaseApp) : null;
+
+function createFirebaseAuth() {
+  if (!firebaseApp) return null;
+  if (Platform.OS === "web") {
+    return getAuth(firebaseApp);
+  }
+  try {
+    return initializeAuth(firebaseApp, {
+      persistence: getReactNativePersistence(AsyncStorage),
+    });
+  } catch {
+    return getAuth(firebaseApp);
+  }
+}
+
+function createFirebaseFirestore() {
+  if (!firebaseApp) return null;
+  if (Platform.OS === "web") {
+    return getFirestore(firebaseApp);
+  }
+  try {
+    return initializeFirestore(firebaseApp, {
+      experimentalAutoDetectLongPolling: true,
+    });
+  } catch {
+    return getFirestore(firebaseApp);
+  }
+}
+
+export const auth = createFirebaseAuth();
+export const db = createFirebaseFirestore();
 export const listingsCollection = db ? collection(db, "listings") : null;
 export const usersCollection = db ? collection(db, "users") : null;
 export const listingDocument = (id: string) =>
   db ? doc(db, "listings", id) : null;
+

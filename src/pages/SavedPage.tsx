@@ -44,7 +44,7 @@ export function SavedPage({
   );
 }
 const styles = StyleSheet.create({
-  content: { padding: 20, paddingBottom: 110 },
+  content: { padding: 20, paddingBottom: 130 },
   columns: { gap: 14 },
   grid: { gap: 14 },
 });

@@ -8,6 +8,11 @@ import {
 } from "react-native";
 import { User } from "firebase/auth";
 import { PageTitle } from "../components/PageTitle";
+import {
+  VerifiedBadge,
+  isUserUniversityVerified,
+} from "../features/university-verification";
+
 export function ProfilePage({
   user,
   savedCount,
@@ -39,6 +44,8 @@ export function ProfilePage({
     .join("")
     .slice(0, 2)
     .toUpperCase();
+  const isVerified = isUserUniversityVerified(user);
+
   return (
     <ScrollView contentContainerStyle={styles.content}>
       <PageTitle title="Profile" subtitle="Your campus marketplace account" />
@@ -54,19 +61,28 @@ export function ProfilePage({
         <Text style={styles.muted}>
           {user?.email || "Sign in to sell and message"}
         </Text>
+        {user && isVerified && (
+          <View style={styles.badgeWrapper}>
+            <VerifiedBadge universityName="University of Jaffna" />
+          </View>
+        )}
       </View>
       <View style={styles.menu}>
+        <Row
+          label="Verification status"
+          value={isVerified ? "🟢 Verified (univ.jfn.ac.lk)" : "Unverified"}
+        />
         <Row
           label="My listings"
           value={String(listingCount)}
           onPress={onMyListings}
         />
         <Row label="Saved items" value={String(savedCount)} onPress={onSaved} />
-        <Row label="Meetup preferences" value="North Campus" />
+        <Row label="Campus / Location" value="University of Jaffna" />
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {user && profileReady ? (
-        <Text style={styles.success}>Profile saved to Firebase</Text>
+        <Text style={styles.success}>Profile verified & saved to Firebase</Text>
       ) : null}
       {user ? (
         <Pressable style={styles.outline} onPress={onSignOut}>
@@ -74,17 +90,18 @@ export function ProfilePage({
         </Pressable>
       ) : (
         <Pressable style={styles.primary} onPress={onSignIn}>
-          <Text style={styles.primaryText}>Sign in to continue</Text>
+          <Text style={styles.primaryText}>Sign in with University Google Account</Text>
         </Pressable>
       )}
       <Text style={styles.backend}>
         {firebaseConfigured
-          ? "Connected to Firebase"
+          ? "Connected to Firebase · University of Jaffna"
           : "Demo mode · Add Firebase keys to connect"}
       </Text>
     </ScrollView>
   );
 }
+
 function Row({
   label,
   value,
@@ -101,6 +118,7 @@ function Row({
     </Pressable>
   );
 }
+
 const styles = StyleSheet.create({
   content: { padding: 20, paddingBottom: 110 },
   hero: { alignItems: "center", paddingBottom: 28 },
@@ -116,6 +134,7 @@ const styles = StyleSheet.create({
   initials: { fontSize: 22, color: "#225347", fontWeight: "800" },
   name: { color: "#173C34", fontSize: 24, fontWeight: "800", marginBottom: 6 },
   muted: { color: "#87918C", fontSize: 12 },
+  badgeWrapper: { marginTop: 10 },
   menu: {
     backgroundColor: "#FFF",
     borderRadius: 16,

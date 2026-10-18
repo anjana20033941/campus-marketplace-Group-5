@@ -22,7 +22,7 @@ export function SupportChatButton({
 const styles = StyleSheet.create({
   floatingButton: {
     position: "absolute",
-    bottom: Platform.OS === "android" ? 104 : 92,
+    bottom: Platform.OS === "android" ? 116 : 96,
     right: 14,
     flexDirection: "row",
     alignItems: "center",

@@ -18,11 +18,15 @@ import { RentBorrowRequest } from "../types";
 export function RentRequestsModal({
   visible,
   sellerId,
+  sellerEmail,
+  sellerName,
   onClose,
   onListingUpdated,
 }: {
   visible: boolean;
   sellerId: string | null;
+  sellerEmail?: string | null;
+  sellerName?: string | null;
   onClose: () => void;
   onListingUpdated?: (listingId: string) => void;
 }) {
@@ -31,19 +35,22 @@ export function RentRequestsModal({
 
   useEffect(() => {
     if (!visible) return;
-    const effectiveSellerId = sellerId || "demo-seller";
-    const unsubscribe = subscribeToIncomingRentRequests(effectiveSellerId, (data) => {
-      setRequests(data);
-    });
+    const unsubscribe = subscribeToIncomingRentRequests(
+      { sellerId, sellerEmail, sellerName },
+      (data) => {
+        setRequests(data);
+      }
+    );
     return () => unsubscribe();
-  }, [visible, sellerId]);
+  }, [visible, sellerId, sellerEmail, sellerName]);
 
-  const handleAccept = async (req: RentBorrowRequest) => {
+  const handleAccept = async (req: RentBorrowRequest, deletePost = false) => {
     setActionLoadingId(req.id);
     try {
       await acceptRentBorrowRequest({
         requestId: req.id,
         listingId: req.listingId,
+        deleteListingPost: deletePost,
         onListingUpdated,
       });
       // Update local state
@@ -145,25 +152,35 @@ export function RentRequestsModal({
 
                   {/* Action Buttons for Pending */}
                   {isPending && (
-                    <View style={styles.actions}>
+                    <View style={styles.actionsCol}>
                       {isLoading ? (
-                        <ActivityIndicator color="#1C7057" />
+                        <ActivityIndicator color="#1C7057" style={{ marginVertical: 10 }} />
                       ) : (
                         <>
                           <Pressable
                             style={[styles.btn, styles.btnAccept]}
-                            onPress={() => handleAccept(item)}
+                            onPress={() => handleAccept(item, false)}
                           >
                             <Text style={styles.btnAcceptText}>
-                              Accept & Rent Out
+                              ✓ Accept & Mark Rented (Hide from feed)
                             </Text>
                           </Pressable>
-                          <Pressable
-                            style={[styles.btn, styles.btnDecline]}
-                            onPress={() => handleReject(item)}
-                          >
-                            <Text style={styles.btnDeclineText}>Decline</Text>
-                          </Pressable>
+                          <View style={styles.actionsRow}>
+                            <Pressable
+                              style={[styles.btn, styles.btnAcceptDelete]}
+                              onPress={() => handleAccept(item, true)}
+                            >
+                              <Text style={styles.btnAcceptDeleteText}>
+                                🗑 Accept & Remove Post
+                              </Text>
+                            </Pressable>
+                            <Pressable
+                              style={[styles.btn, styles.btnDecline]}
+                              onPress={() => handleReject(item)}
+                            >
+                              <Text style={styles.btnDeclineText}>Decline</Text>
+                            </Pressable>
+                          </View>
                         </>
                       )}
                     </View>
@@ -287,10 +304,13 @@ const styles = StyleSheet.create({
     color: "#374943",
     marginBottom: 10,
   },
-  actions: {
+  actionsCol: {
+    marginTop: 8,
+    gap: 8,
+  },
+  actionsRow: {
     flexDirection: "row",
-    gap: 10,
-    marginTop: 4,
+    gap: 8,
   },
   btn: {
     flex: 1,
@@ -303,7 +323,17 @@ const styles = StyleSheet.create({
   },
   btnAcceptText: {
     color: "#FFF",
-    fontSize: 13,
+    fontSize: 12.5,
+    fontWeight: "700",
+  },
+  btnAcceptDelete: {
+    backgroundColor: "#FDF2F2",
+    borderWidth: 1,
+    borderColor: "#F5C2C7",
+  },
+  btnAcceptDeleteText: {
+    color: "#B4232C",
+    fontSize: 12.5,
     fontWeight: "700",
   },
   btnDecline: {

@@ -11,8 +11,13 @@ export function filterMarketplaceItems(params: {
   const cleanQuery = query.toLowerCase().trim();
 
   return items.filter((item) => {
-    // 1. Availability filter (rented items hidden)
-    if ((item as any).isAvailable === false) {
+    // 1. Availability filter (rented or deleted items hidden)
+    if (
+      (item as any).isAvailable === false ||
+      item.isDeleted ||
+      item.deleted ||
+      item.status === "deleted"
+    ) {
       return false;
     }
 

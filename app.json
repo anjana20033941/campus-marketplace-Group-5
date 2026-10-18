@@ -2,6 +2,7 @@
   "expo": {
     "name": "campus-marketplace",
     "slug": "campus-marketplace",
+    "scheme": "campus-marketplace",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -21,6 +22,16 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "The app accesses your photos to allow you to post items on the marketplace.",
+          "cameraPermission": "The app accesses your camera to let you take photos of items you want to sell."
+        }
+      ]
+    ]
   }
 }

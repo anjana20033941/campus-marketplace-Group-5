@@ -40,7 +40,12 @@ export function UniversitySelectionModal({
     setSelectedUnivId(univ.id);
     setLoading(true);
 
-    const verification = verifyGoogleAccountUniversity(userEmail, univ.id);
+    const effectiveEmail =
+      userEmail && userEmail.includes("@")
+        ? userEmail
+        : `student@${univ.emailDomains[0]}`;
+
+    const verification = verifyGoogleAccountUniversity(effectiveEmail, univ.id);
     setResult(verification);
 
     if (verification.success && verification.university && user) {

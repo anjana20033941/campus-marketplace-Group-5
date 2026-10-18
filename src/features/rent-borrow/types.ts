@@ -12,6 +12,7 @@ export interface RentBorrowRequest {
   requesterEmail?: string;
   sellerId: string;
   sellerName: string;
+  sellerEmail?: string;
   type: RentBorrowType; // "rent" or "borrow"
   status: RentBorrowStatus; // "pending", "accepted", "rejected", "returned"
   duration: string; // e.g. "3 days", "1 week"
