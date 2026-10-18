@@ -1,8 +1,5 @@
-import { registerRootComponent } from 'expo';
-
-import App from './App';
-
-// registerRootComponent calls AppRegistry.registerComponent('main', () => App);
-// It also ensures that whether you load the app in Expo Go or in a native build,
-// the environment is set up appropriately
-registerRootComponent(App);
+export * from "./types";
+export * from "./constants";
+export * from "./services/filterService";
+export * from "./components/ConditionTag";
+export * from "./components/ConditionFilterBar";
