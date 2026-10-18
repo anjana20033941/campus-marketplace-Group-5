@@ -1,41 +1,20 @@
-# Campus Marketplace
+# University Verification Using Google Sign-In (`src/features/university-verification`)
 
-Expo SDK 57 React Native app for buying and selling items within a campus community.
+This module implements the **University Domain Verification System** using Google OAuth.
 
-## Run locally
+## Verification Architecture
 
-Expo SDK 57 requires Node 22.13 or newer.
+- **No Separate Passwords or OTPs**: Uses Google OAuth's authenticated email to verify domain membership.
+- **Configurable Institution Database**: `universities.ts` houses universities and their approved domain lists (e.g., University of Jaffna `@univ.jfn.ac.lk`, University of Colombo `@cmb.ac.lk`, University of Moratuwa `@uom.lk`).
+- **Domain Mismatch Guard**: Users cannot enter university emails manually; only the domain returned by Google Sign-In is accepted. If there is a mismatch, a clear explanation with allowed domains is shown.
+- **Verified Status Badge**: `🟢 University Verified` is displayed across listings, seller profile, and review sections.
+- **Persistent Profile & Security**: Upon successful domain verification, the user's Firestore record is updated with `universityVerified: true` and the verified institution name.
 
-```bash
-cp .env.example .env
-npm install
-npm run web
-```
+## File Structure
 
-The app runs in demo mode until Firebase values are added to `.env`.
-
-## Firebase setup
-
-1. Create a Firebase project and register a Web app.
-2. Enable Google Authentication under Authentication > Sign-in method. Anonymous Authentication remains available for native fallback.
-3. Create a Cloud Firestore database.
-4. Copy the Web app configuration into `.env` using `.env.example`.
-5. Deploy `firestore.rules` with the Firebase CLI or paste them into the Firestore Rules tab.
-
-The app uses:
-
-- `listings`: public reads, authenticated seller-owned creates and edits.
-- `users/{uid}` and `users/{uid}/saved/{listingId}`: owner-only access.
-- `conversations`: members-only access, with messages in a subcollection.
-
-The client Firebase configuration is intentionally public. Access control belongs in Authentication, Firestore Rules, and App Check; never put Admin SDK credentials in this app.
-
-## Current product flows
-
-- Explore listings with search and category filters.
-- Browse and search without signing in; Google sign-in is required to contact sellers or publish listings.
-- Save and unsave listings.
-- Open a listing detail view and start a seller conversation.
-- Publish a basic listing through the Sell flow.
-- Sign in anonymously for a frictionless student account.
-- View Saved, Messages, and Profile pages.
+- `types.ts`: TypeScript contracts for `University`, `VerificationResult`, `UniversityUserProfile`.
+- `universities.ts`: Database of approved universities and their official email domains.
+- `services/universityVerificationService.ts`: Domain verification algorithms and profile sync.
+- `components/VerifiedBadge.tsx`: Visual badge component for verified campus members.
+- `components/UniversitySelectionModal.tsx`: Step 2 modal following Google Sign-In.
+- `index.ts`: Barrel export.
