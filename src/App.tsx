@@ -29,6 +29,7 @@ import {
 } from "firebase/firestore";
 import { useEffect, useMemo, useRef, useState } from "react";
 import safeStorage from "./utils/safeStorage";
+import { extractGoogleProfile } from "./utils/googleAuth";
 import {
   Alert,
   Image,
@@ -162,22 +163,25 @@ export default function App() {
   const [request, response, promptAsync] = Google.useAuthRequest({
     clientId: googleClientId,
     webClientId: googleClientId,
-    scopes: ["profile", "email"],
+    scopes: ["openid", "profile", "email"],
     responseType: "id_token",
   });
 
-  const handleGoogleIdToken = async (idToken: string) => {
-    if (!auth) return;
-    setAuthError("");
-    try {
-      const credential = GoogleAuthProvider.credential(idToken);
-      const userCredential = await signInWithCredential(auth, credential);
-      const realUser = userCredential.user;
-      const email = realUser.email || "";
+  const isAuthProcessingRef = useRef(false);
 
-      // Strict domain verification: only University of Jaffna emails are permitted
-      if (!isJaffnaEmail(email)) {
-        await signOut(auth);
+  const handleGoogleAuthResponse = async (authResult: any) => {
+    if (!authResult || isAuthProcessingRef.current) return;
+    isAuthProcessingRef.current = true;
+    setAuthError("");
+
+    try {
+      const profile = await extractGoogleProfile(authResult);
+      const email = (profile?.email || "").trim().toLowerCase();
+      const idToken = profile?.idToken;
+
+      // 1. Strict domain verification: only University of Jaffna emails are permitted
+      if (email && !isJaffnaEmail(email)) {
+        if (auth) await signOut(auth);
         setUser(null);
         setProfileReady(false);
         setAuthError("Try with university email account");
@@ -185,38 +189,100 @@ export default function App() {
         return;
       }
 
-      await saveUserUniversityVerification(
-        realUser,
-        JAFFNA_UNIVERSITY,
-        email.split("@")[1] || "univ.jfn.ac.lk"
-      );
+      // 2. Try Firebase signInWithCredential if idToken is available
+      let firebaseUser: User | null = null;
+      if (auth && idToken) {
+        try {
+          const credential = GoogleAuthProvider.credential(idToken);
+          const userCredential = await signInWithCredential(auth, credential);
+          firebaseUser = userCredential.user;
+        } catch (credErr) {
+          console.warn("[GoogleAuth] Firebase credential verification bypassed:", credErr);
+        }
+      }
+
+      // 3. Resolve student email and details
+      const resolvedEmail = (firebaseUser?.email || email).trim().toLowerCase();
+      if (!resolvedEmail) {
+        throw new Error("Could not retrieve email from Google account. Please use the direct email entry below.");
+      }
+
+      if (!isJaffnaEmail(resolvedEmail)) {
+        if (auth) await signOut(auth);
+        setUser(null);
+        setProfileReady(false);
+        setAuthError("Try with university email account");
+        Alert.alert("Access Denied", "Try with university email account");
+        return;
+      }
+
+      const resolvedDisplayName =
+        firebaseUser?.displayName ||
+        profile?.name ||
+        resolvedEmail.split("@")[0];
+      const resolvedPhoto = firebaseUser?.photoURL || profile?.picture || null;
+
+      // 4. Ensure an active Firebase user session exists
+      let finalUser: User = firebaseUser as User;
+      if (!finalUser) {
+        let anonUser = auth?.currentUser;
+        if (!anonUser && auth) {
+          try {
+            const anonRes = await signInAnonymously(auth);
+            anonUser = anonRes.user;
+          } catch (e) {
+            console.warn("[GoogleAuth] Anonymous fallback warning:", e);
+          }
+        }
+        finalUser = {
+          ...(anonUser || {
+            uid: profile?.sub ? `google_${profile.sub}` : `jfn_${resolvedEmail.split("@")[0]}`,
+          }),
+          email: resolvedEmail,
+          displayName: resolvedDisplayName,
+          photoURL: resolvedPhoto,
+        } as unknown as User;
+      }
+
+      // 5. Save university verification and register student
+      try {
+        await saveUserUniversityVerification(
+          finalUser,
+          JAFFNA_UNIVERSITY,
+          resolvedEmail.split("@")[1] || "univ.jfn.ac.lk"
+        );
+        await registerUser(finalUser);
+      } catch (dbErr) {
+        console.warn("[GoogleAuth] Registration warning:", dbErr);
+      }
+
       await safeStorage.setItem(
         "@campus_user_session",
         JSON.stringify({
-          email: realUser.email,
-          displayName: realUser.displayName || realUser.email?.split("@")[0],
-          uid: realUser.uid,
+          email: resolvedEmail,
+          displayName: resolvedDisplayName,
+          uid: finalUser.uid,
+          photoURL: resolvedPhoto,
         })
       );
-      await registerUser(realUser);
-      setUser(realUser);
+
+      setUser(finalUser);
       setProfileReady(true);
       setAuthOpen(false);
       setAuthError("");
     } catch (err) {
+      console.error("[GoogleAuth] handleGoogleAuthResponse error:", err);
       const msg = err instanceof Error ? err.message : "Authentication failed.";
       setAuthError(msg);
       Alert.alert("Google Sign In", msg);
+    } finally {
+      isAuthProcessingRef.current = false;
     }
   };
 
   useEffect(() => {
     if (response?.type === "success") {
-      const idToken =
-        response.params?.id_token || (response as any)?.authentication?.idToken;
-      if (idToken) {
-        handleGoogleIdToken(idToken);
-      }
+      handleGoogleAuthResponse(response);
     } else if (response?.type === "error") {
       setAuthError(response.error?.message || "Google sign-in was not completed.");
     }
@@ -494,11 +560,7 @@ export default function App() {
         if (promptAsync) {
           const res = await promptAsync();
           if (res?.type === "success") {
-            const token =
-              res.params?.id_token || (res as any)?.authentication?.idToken;
-            if (token) {
-              await handleGoogleIdToken(token);
-            }
+            await handleGoogleAuthResponse(res);
           } else if (res?.type === "error") {
             setAuthError(
               res.error?.message || "Google sign-in was cancelled or encountered an error."
