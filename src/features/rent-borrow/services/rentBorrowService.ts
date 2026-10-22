@@ -9,13 +9,44 @@ import {
   query,
   serverTimestamp,
   updateDoc,
+  where,
 } from "firebase/firestore";
+import safeStorage from "../../../utils/safeStorage";
 import { db } from "../../../firebase";
 import { Listing } from "../../../types";
 import { RentBorrowRequest, RentBorrowType } from "../types";
 
+const CACHE_KEY = "@rent_requests_cache";
+
 // In-memory mock storage for demo / offline mode
 let localRequests: RentBorrowRequest[] = [];
+let cacheLoaded = false;
+
+async function loadCache(): Promise<RentBorrowRequest[]> {
+  if (cacheLoaded && localRequests.length > 0) return localRequests;
+  try {
+    const raw = await safeStorage.getItem(CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const existingIds = new Set(localRequests.map((r) => r.id));
+        for (const item of parsed) {
+          if (!existingIds.has(item.id)) {
+            localRequests.push(item);
+          }
+        }
+      }
+    }
+  } catch {}
+  cacheLoaded = true;
+  return localRequests;
+}
+
+async function persistCache(list: RentBorrowRequest[]): Promise<void> {
+  try {
+    await safeStorage.setItem(CACHE_KEY, JSON.stringify(list));
+  } catch {}
+}
 
 /**
  * Send a new Rent or Borrow request to the seller
@@ -32,16 +63,26 @@ export async function sendRentBorrowRequest(params: {
 }): Promise<RentBorrowRequest> {
   const { listing, requesterId, requesterName, requesterEmail, type, duration, offeredPrice, message } = params;
 
+  await loadCache();
+
+  // Normalize strings
+  const cleanRequesterEmail = (requesterEmail || "").trim().toLowerCase();
+  const cleanRequesterName = requesterName || (cleanRequesterEmail ? cleanRequesterEmail.split("@")[0] : "Jaffna Student");
+
+  const cleanSellerEmail = (listing.sellerEmail || "").trim().toLowerCase();
+  const cleanSellerName = listing.seller || (cleanSellerEmail ? cleanSellerEmail.split("@")[0] : "Jaffna Student");
+  const cleanSellerId = listing.sellerId || "demo-seller";
+
   const newRequest: Omit<RentBorrowRequest, "id"> = {
     listingId: listing.id,
     listingTitle: listing.title,
     listingImage: listing.image,
     requesterId,
-    requesterName,
-    requesterEmail: requesterEmail || "",
-    sellerId: listing.sellerId || "demo-seller",
-    sellerName: listing.seller || "Jaffna Student",
-    sellerEmail: listing.sellerEmail || "",
+    requesterName: cleanRequesterName,
+    requesterEmail: cleanRequesterEmail,
+    sellerId: cleanSellerId,
+    sellerName: cleanSellerName,
+    sellerEmail: cleanSellerEmail,
     type,
     status: "pending",
     duration,
@@ -50,27 +91,32 @@ export async function sendRentBorrowRequest(params: {
     createdAt: Date.now(),
   };
 
+  let savedRequest: RentBorrowRequest;
+
   if (db) {
-    const docRef = await addDoc(collection(db, "rentRequests"), {
-      ...newRequest,
-      createdAt: serverTimestamp(),
-    });
-    return { id: docRef.id, ...newRequest };
+    try {
+      const docRef = await addDoc(collection(db, "rentRequests"), {
+        ...newRequest,
+        createdAt: serverTimestamp(),
+      });
+      savedRequest = { id: docRef.id, ...newRequest };
+    } catch (err) {
+      console.warn("Firestore addDoc error for rentRequests, falling back to local:", err);
+      savedRequest = { id: "req_" + Date.now(), ...newRequest };
+    }
   } else {
-    // Offline / Demo fallback
-    const mockRequest: RentBorrowRequest = {
-      id: "req_" + Date.now(),
-      ...newRequest,
-    };
-    localRequests.unshift(mockRequest);
-    return mockRequest;
+    savedRequest = { id: "req_" + Date.now(), ...newRequest };
   }
+
+  // Always update in-memory and local cache
+  localRequests = [savedRequest, ...localRequests.filter((r) => r.id !== savedRequest.id)];
+  await persistCache(localRequests);
+
+  return savedRequest;
 }
 
 /**
  * Seller accepts the Rent/Borrow request.
- * Crucial step: Updates the request status to 'accepted' AND
- * updates the listing to `isAvailable: false` (or removes it from active exploration list).
  */
 export async function acceptRentBorrowRequest(params: {
   requestId: string;
@@ -80,33 +126,46 @@ export async function acceptRentBorrowRequest(params: {
 }): Promise<void> {
   const { requestId, listingId, deleteListingPost, onListingUpdated } = params;
 
-  if (db) {
-    // 1. Mark request as accepted
-    const reqRef = doc(db, "rentRequests", requestId);
-    await updateDoc(reqRef, {
-      status: "accepted",
-      updatedAt: serverTimestamp(),
-    });
+  // 1. Update in-memory & persistent cache
+  localRequests = localRequests.map((r) =>
+    r.id === requestId ? { ...r, status: "accepted", updatedAt: Date.now() } : r
+  );
+  await persistCache(localRequests);
 
-    // 2. Either delete or hide listing status
-    if (listingId) {
+  if (db) {
+    // 2. Mark request as accepted in Firestore
+    try {
+      const reqRef = doc(db, "rentRequests", requestId);
+      await updateDoc(reqRef, {
+        status: "accepted",
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.warn("Firestore update error on accept rentRequest:", err);
+    }
+
+    // 3. Update listing status or delete
+    if (listingId && !["1", "2", "3", "4"].includes(listingId)) {
       const listingRef = doc(db, "listings", listingId);
       if (deleteListingPost) {
-        await deleteDoc(listingRef).catch(() => {});
+        try {
+          await updateDoc(listingRef, {
+            isDeleted: true,
+            status: "deleted",
+            isAvailable: false,
+            updatedAt: serverTimestamp(),
+          });
+          await deleteDoc(listingRef);
+        } catch {}
       } else {
-        await updateDoc(listingRef, {
-          isAvailable: false,
-          rentalStatus: "rented",
-          updatedAt: serverTimestamp(),
-        }).catch(() => {});
+        try {
+          await updateDoc(listingRef, {
+            isAvailable: false,
+            rentalStatus: "rented",
+            updatedAt: serverTimestamp(),
+          });
+        } catch {}
       }
-    }
-  } else {
-    // Offline demo
-    const req = localRequests.find((r) => r.id === requestId);
-    if (req) {
-      req.status = "accepted";
-      req.updatedAt = Date.now();
     }
   }
 
@@ -119,17 +178,20 @@ export async function acceptRentBorrowRequest(params: {
  * Seller rejects the Rent/Borrow request.
  */
 export async function rejectRentBorrowRequest(requestId: string): Promise<void> {
+  localRequests = localRequests.map((r) =>
+    r.id === requestId ? { ...r, status: "rejected", updatedAt: Date.now() } : r
+  );
+  await persistCache(localRequests);
+
   if (db) {
-    const reqRef = doc(db, "rentRequests", requestId);
-    await updateDoc(reqRef, {
-      status: "rejected",
-      updatedAt: serverTimestamp(),
-    });
-  } else {
-    const req = localRequests.find((r) => r.id === requestId);
-    if (req) {
-      req.status = "rejected";
-      req.updatedAt = Date.now();
+    try {
+      const reqRef = doc(db, "rentRequests", requestId);
+      await updateDoc(reqRef, {
+        status: "rejected",
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.warn("Firestore update error on reject rentRequest:", err);
     }
   }
 }
@@ -143,7 +205,6 @@ export async function deleteMarketplaceListing(listingId: string): Promise<void>
   if (db && !["1", "2", "3", "4"].includes(listingId)) {
     const ref = doc(db, "listings", listingId);
 
-    // 1. Soft-delete first: updateDoc often succeeds even when deleteDoc rules are restricted
     try {
       await updateDoc(ref, {
         isDeleted: true,
@@ -156,7 +217,6 @@ export async function deleteMarketplaceListing(listingId: string): Promise<void>
       console.warn("Firestore soft delete error (handled):", err);
     }
 
-    // 2. Hard-delete: attempt to remove document completely
     try {
       await deleteDoc(ref);
     } catch (err) {
@@ -197,6 +257,43 @@ export type SellerQueryTarget =
     };
 
 /**
+ * Matches a request against the target seller (matches by UID, Email, Email Prefix, or Display Name)
+ */
+function isMatchingSeller(r: RentBorrowRequest, target: { id: string; email: string; name: string; prefix: string }): boolean {
+  const { id: targetId, email: targetEmail, name: targetName, prefix: targetPrefix } = target;
+
+  // 1. Direct UID match
+  if (targetId && r.sellerId && r.sellerId === targetId) return true;
+
+  // 2. Direct Email match (case-insensitive)
+  if (targetEmail && r.sellerEmail && r.sellerEmail.trim().toLowerCase() === targetEmail) return true;
+
+  // 3. Username / Email prefix match (e.g. "2023csc051")
+  if (targetPrefix) {
+    const rSellerEmail = (r.sellerEmail || "").trim().toLowerCase();
+    const rSellerEmailPrefix = rSellerEmail ? rSellerEmail.split("@")[0] : "";
+    if (rSellerEmailPrefix && rSellerEmailPrefix === targetPrefix) return true;
+
+    const rSellerName = (r.sellerName || "").trim().toLowerCase();
+    if (rSellerName && (rSellerName === targetPrefix || rSellerName.includes(targetPrefix))) return true;
+  }
+
+  // 4. Direct Name match
+  if (targetName && r.sellerName && r.sellerName.trim().toLowerCase() === targetName) return true;
+
+  // 5. Demo fallback: If item had default seller and request was sent by someone else
+  if (
+    (r.sellerId === "demo-seller" || !r.sellerId) &&
+    (!targetEmail || (r.requesterEmail && r.requesterEmail.toLowerCase() !== targetEmail)) &&
+    (!targetId || r.requesterId !== targetId)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Subscribe to incoming requests for a seller (matches by UID, Email, or Name)
  */
 export function subscribeToIncomingRentRequests(
@@ -208,72 +305,118 @@ export function subscribeToIncomingRentRequests(
     typeof target === "string" ? "" : (target?.sellerEmail || "").trim().toLowerCase();
   const targetName =
     typeof target === "string" ? "" : (target?.sellerName || "").trim().toLowerCase();
+  const targetPrefix = targetEmail ? targetEmail.split("@")[0] : targetName;
+
+  const targetCriteria = { id: targetId, email: targetEmail, name: targetName, prefix: targetPrefix };
 
   const filterRequests = (list: RentBorrowRequest[]) => {
-    return list.filter((r) => {
-      // 1. Direct UID match
-      if (targetId && r.sellerId && r.sellerId === targetId) return true;
-      // 2. Direct email match
-      if (targetEmail && r.sellerEmail && r.sellerEmail.trim().toLowerCase() === targetEmail) return true;
-      // 3. Direct name match
-      if (targetName && r.sellerName && r.sellerName.trim().toLowerCase() === targetName) return true;
-      // 4. Demo fallback: If item had default seller and request was sent by someone else
-      if (
-        (r.sellerId === "demo-seller" || !r.sellerId) &&
-        (!targetEmail || (r.requesterEmail && r.requesterEmail.toLowerCase() !== targetEmail))
-      ) {
-        return true;
-      }
-      return false;
-    });
+    return list.filter((r) => isMatchingSeller(r, targetCriteria));
   };
 
-  // If no user / seller is logged in, don't query Firestore
+  // If no user is logged in, don't query
   if (!targetId && !targetEmail && !targetName) {
-    callback(filterRequests(localRequests));
+    loadCache().then((cached) => callback(filterRequests(cached)));
     return () => undefined;
   }
+
+  const combinedMap = new Map<string, RentBorrowRequest>();
+  const unsubs: (() => void)[] = [];
+  let isSubscribed = true;
+
+  const emit = () => {
+    if (!isSubscribed) return;
+    const merged = Array.from(combinedMap.values());
+    merged.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    callback(filterRequests(merged));
+  };
+
+  // 1. Immediately emit from local cache
+  loadCache().then((cached) => {
+    if (!isSubscribed) return;
+    for (const r of cached) {
+      if (!combinedMap.has(r.id)) combinedMap.set(r.id, r);
+    }
+    emit();
+  });
 
   if (!db) {
-    callback(filterRequests(localRequests));
-    return () => undefined;
+    return () => {
+      isSubscribed = false;
+    };
   }
 
-  const q = query(collection(db, "rentRequests"), orderBy("createdAt", "desc"));
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const items = snapshot.docs.map(
-        (docSnap) => ({ id: docSnap.id, ...docSnap.data() } as RentBorrowRequest)
-      );
-      callback(filterRequests(items));
-    },
-    (err) => {
-      // Handle permission-denied or offline silently without triggering LogBox alert
-      if (err?.code === "permission-denied" || err?.message?.includes("permissions")) {
-        callback(filterRequests(localRequests));
-        return;
-      }
-      // Fallback: try querying without order if index is pending
-      if (db) {
-        try {
-          const fallbackQuery = query(collection(db, "rentRequests"));
-          onSnapshot(
-            fallbackQuery,
-            (snapshot) => {
-              const items = snapshot.docs.map(
-                (docSnap) => ({ id: docSnap.id, ...docSnap.data() } as RentBorrowRequest)
-              );
-              callback(filterRequests(items));
-            },
-            () => callback(filterRequests(localRequests))
-          );
-        } catch {
-          callback(filterRequests(localRequests));
-        }
-      }
+  // 2. Set up Firestore snapshot listeners that comply with security rules
+  const handleSnapshot = (snapshot: any) => {
+    if (!isSubscribed) return;
+    let hasNew = false;
+    for (const docSnap of snapshot.docs) {
+      const data = { id: docSnap.id, ...docSnap.data() } as RentBorrowRequest;
+      combinedMap.set(data.id, data);
+      hasNew = true;
     }
-  );
+    if (hasNew) {
+      const currentList = Array.from(combinedMap.values());
+      localRequests = currentList;
+      persistCache(currentList);
+      emit();
+    }
+  };
+
+  // Query A: by sellerId (matches UID rule in security rules)
+  if (targetId) {
+    try {
+      const qId = query(collection(db, "rentRequests"), where("sellerId", "==", targetId));
+      const unsub = onSnapshot(qId, handleSnapshot, () => {});
+      unsubs.push(unsub);
+    } catch {}
+  }
+
+  // Query B: by sellerEmail
+  if (targetEmail) {
+    try {
+      const qEmail = query(collection(db, "rentRequests"), where("sellerEmail", "==", targetEmail));
+      const unsub = onSnapshot(qEmail, handleSnapshot, () => {});
+      unsubs.push(unsub);
+    } catch {}
+  }
+
+  // Query C: by sellerName
+  if (targetName) {
+    try {
+      const qName = query(collection(db, "rentRequests"), where("sellerName", "==", targetName));
+      const unsub = onSnapshot(qName, handleSnapshot, () => {});
+      unsubs.push(unsub);
+    } catch {}
+  }
+
+  // Fallback Query D: general query (in case open rules are active)
+  try {
+    const qGeneral = query(collection(db, "rentRequests"));
+    const unsub = onSnapshot(qGeneral, handleSnapshot, () => {});
+    unsubs.push(unsub);
+  } catch {}
+
+  return () => {
+    isSubscribed = false;
+    unsubs.forEach((u) => u());
+  };
+}
+
+/**
+ * Matches outgoing requests sent by a student
+ */
+function isMatchingRequester(r: RentBorrowRequest, target: { id: string; email: string; prefix: string }): boolean {
+  const { id: requesterId, email: reqEmailLower, prefix: reqPrefix } = target;
+
+  if (requesterId && r.requesterId === requesterId) return true;
+  if (reqEmailLower && r.requesterEmail && r.requesterEmail.trim().toLowerCase() === reqEmailLower) return true;
+  if (reqPrefix) {
+    const rEmail = (r.requesterEmail || "").trim().toLowerCase();
+    if (rEmail && rEmail.split("@")[0] === reqPrefix) return true;
+    const rName = (r.requesterName || "").trim().toLowerCase();
+    if (rName && (rName === reqPrefix || rName.includes(reqPrefix))) return true;
+  }
+  return false;
 }
 
 /**
@@ -285,35 +428,89 @@ export function subscribeToMyRentRequests(
   callback: (requests: RentBorrowRequest[]) => void
 ): () => void {
   const reqEmailLower = (requesterEmail || "").trim().toLowerCase();
+  const reqPrefix = reqEmailLower ? reqEmailLower.split("@")[0] : "";
+  const target = { id: requesterId, email: reqEmailLower, prefix: reqPrefix };
 
   const filterMyRequests = (list: RentBorrowRequest[]) => {
-    return list.filter((r) => {
-      if (requesterId && r.requesterId === requesterId) return true;
-      if (reqEmailLower && r.requesterEmail && r.requesterEmail.toLowerCase() === reqEmailLower) return true;
-      return false;
-    });
+    return list.filter((r) => isMatchingRequester(r, target));
   };
 
-  // If not logged in, don't query Firestore
+  // If not logged in, don't query
   if (!requesterId && !reqEmailLower) {
-    callback(filterMyRequests(localRequests));
+    loadCache().then((cached) => callback(filterMyRequests(cached)));
     return () => undefined;
   }
+
+  const combinedMap = new Map<string, RentBorrowRequest>();
+  const unsubs: (() => void)[] = [];
+  let isSubscribed = true;
+
+  const emit = () => {
+    if (!isSubscribed) return;
+    const merged = Array.from(combinedMap.values());
+    merged.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    callback(filterMyRequests(merged));
+  };
+
+  // 1. Immediately emit from local cache
+  loadCache().then((cached) => {
+    if (!isSubscribed) return;
+    for (const r of cached) {
+      if (!combinedMap.has(r.id)) combinedMap.set(r.id, r);
+    }
+    emit();
+  });
 
   if (!db) {
-    callback(filterMyRequests(localRequests));
-    return () => undefined;
+    return () => {
+      isSubscribed = false;
+    };
   }
 
-  const q = query(collection(db, "rentRequests"), orderBy("createdAt", "desc"));
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const items = snapshot.docs.map(
-        (docSnap) => ({ id: docSnap.id, ...docSnap.data() } as RentBorrowRequest)
-      );
-      callback(filterMyRequests(items));
-    },
-    () => callback(filterMyRequests(localRequests))
-  );
+  // 2. Set up Firestore snapshot listeners that comply with security rules
+  const handleSnapshot = (snapshot: any) => {
+    if (!isSubscribed) return;
+    let hasNew = false;
+    for (const docSnap of snapshot.docs) {
+      const data = { id: docSnap.id, ...docSnap.data() } as RentBorrowRequest;
+      combinedMap.set(data.id, data);
+      hasNew = true;
+    }
+    if (hasNew) {
+      const currentList = Array.from(combinedMap.values());
+      localRequests = currentList;
+      persistCache(currentList);
+      emit();
+    }
+  };
+
+  // Query A: by requesterId
+  if (requesterId) {
+    try {
+      const qId = query(collection(db, "rentRequests"), where("requesterId", "==", requesterId));
+      const unsub = onSnapshot(qId, handleSnapshot, () => {});
+      unsubs.push(unsub);
+    } catch {}
+  }
+
+  // Query B: by requesterEmail
+  if (reqEmailLower) {
+    try {
+      const qEmail = query(collection(db, "rentRequests"), where("requesterEmail", "==", reqEmailLower));
+      const unsub = onSnapshot(qEmail, handleSnapshot, () => {});
+      unsubs.push(unsub);
+    } catch {}
+  }
+
+  // Fallback Query C: general
+  try {
+    const qGeneral = query(collection(db, "rentRequests"));
+    const unsub = onSnapshot(qGeneral, handleSnapshot, () => {});
+    unsubs.push(unsub);
+  } catch {}
+
+  return () => {
+    isSubscribed = false;
+    unsubs.forEach((u) => u());
+  };
 }

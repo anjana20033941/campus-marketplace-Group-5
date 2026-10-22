@@ -28,7 +28,7 @@ import {
   setDoc,
 } from "firebase/firestore";
 import { useEffect, useMemo, useRef, useState } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import safeStorage from "./utils/safeStorage";
 import {
   Alert,
   Image,
@@ -62,7 +62,12 @@ import { seedListings } from "./data";
 import { auth, db, firebaseConfigured } from "./firebase";
 import { Listing, Tab } from "./types";
 import { SupportChatButton, SupportChatModal } from "./features/support-chatbot";
-import { RentBorrowModal, RentRequestsModal, deleteMarketplaceListing } from "./features/rent-borrow";
+import {
+  RentBorrowModal,
+  RentRequestsModal,
+  deleteMarketplaceListing,
+  subscribeToIncomingRentRequests,
+} from "./features/rent-borrow";
 import { ConditionReviewsSection } from "./features/condition-rating";
 import { ItemCondition, filterMarketplaceItems } from "./features/condition-filter";
 import {
@@ -113,7 +118,7 @@ export default function App() {
   const deletedIdsRef = useRef<string[]>([]);
 
   useEffect(() => {
-    AsyncStorage.getItem("@deleted_listing_ids")
+    safeStorage.getItem("@deleted_listing_ids")
       .then((stored) => {
         if (stored) {
           try {
@@ -128,6 +133,27 @@ export default function App() {
       })
       .catch(() => {});
   }, []);
+
+  const [incomingRequestsCount, setIncomingRequestsCount] = useState(0);
+
+  useEffect(() => {
+    if (!user) {
+      setIncomingRequestsCount(0);
+      return;
+    }
+    const unsub = subscribeToIncomingRentRequests(
+      {
+        sellerId: user.uid,
+        sellerEmail: user.email,
+        sellerName: user.displayName || user.email?.split("@")[0],
+      },
+      (reqs) => {
+        const pendingCount = reqs.filter((r) => r.status === "pending").length;
+        setIncomingRequestsCount(pendingCount);
+      }
+    );
+    return () => unsub();
+  }, [user]);
 
   const googleClientId =
     process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ||
@@ -164,6 +190,14 @@ export default function App() {
         JAFFNA_UNIVERSITY,
         email.split("@")[1] || "univ.jfn.ac.lk"
       );
+      await safeStorage.setItem(
+        "@campus_user_session",
+        JSON.stringify({
+          email: realUser.email,
+          displayName: realUser.displayName || realUser.email?.split("@")[0],
+          uid: realUser.uid,
+        })
+      );
       await registerUser(realUser);
       setUser(realUser);
       setProfileReady(true);
@@ -193,11 +227,33 @@ export default function App() {
     if (!firebaseAuth) return;
     const handleUser = async (nextUser: User | null) => {
       if (nextUser) {
-        const email = nextUser.email;
-        // Verify only if an email is present on the user object
+        let email = nextUser.email || "";
+        let displayName = nextUser.displayName || "";
+
+        // If email or displayName is missing (e.g. from anonymous auth or reload), restore from session cache
+        if (!email) {
+          try {
+            const savedRaw = await safeStorage.getItem("@campus_user_session");
+            if (savedRaw) {
+              const saved = JSON.parse(savedRaw);
+              if (saved?.email) {
+                email = saved.email;
+                displayName = displayName || saved.displayName || email.split("@")[0];
+              }
+            }
+          } catch {}
+        }
+
+        const enrichedUser = {
+          ...nextUser,
+          email: email || nextUser.email,
+          displayName: displayName || nextUser.displayName || (email ? email.split("@")[0] : "Jaffna Student"),
+        } as unknown as User;
+
         if (email) {
           if (!isJaffnaEmail(email)) {
             await signOut(firebaseAuth);
+            await safeStorage.removeItem("@campus_user_session");
             setUser(null);
             setProfileReady(false);
             setAuthError("Try with university email account");
@@ -205,14 +261,15 @@ export default function App() {
           }
 
           saveUserUniversityVerification(
-            nextUser,
+            enrichedUser,
             JAFFNA_UNIVERSITY,
             email.split("@")[1] || "univ.jfn.ac.lk"
           );
         }
-        setUser(nextUser);
+
+        setUser(enrichedUser);
         setAuthError("");
-        registerUser(nextUser)
+        registerUser(enrichedUser)
           .then(() => setProfileReady(true))
           .catch((error) =>
             setAuthError(
@@ -289,11 +346,11 @@ export default function App() {
   };
 
   const handleListingDeleted = (listingId: string) => {
-    // 1. Immediately track in ref & persistent AsyncStorage
+    // 1. Immediately track in ref & persistent safeStorage
     const nextList = Array.from(new Set([...deletedIdsRef.current, listingId]));
     deletedIdsRef.current = nextList;
     setDeletedListingIds(nextList);
-    AsyncStorage.setItem("@deleted_listing_ids", JSON.stringify(nextList)).catch(() => {});
+    safeStorage.setItem("@deleted_listing_ids", JSON.stringify(nextList)).catch(() => {});
 
     // 2. Immediately remove from active state
     setItems((current) => current.filter((x) => x.id !== listingId));
@@ -349,19 +406,40 @@ export default function App() {
       const resolvedName = resolvedEmail.split("@")[0];
 
       try {
-        const anonResult = await signInAnonymously(auth);
-        const customUser = {
-          ...anonResult.user,
-          email: resolvedEmail,
-          displayName: resolvedName,
-        } as unknown as User;
-
-        await saveUserUniversityVerification(
-          customUser,
-          JAFFNA_UNIVERSITY,
-          resolvedEmail.split("@")[1] || "univ.jfn.ac.lk"
+        await safeStorage.setItem(
+          "@campus_user_session",
+          JSON.stringify({
+            email: resolvedEmail,
+            displayName: resolvedName,
+          })
         );
-        await registerUser(customUser);
+        let customUser: User;
+        try {
+          const anonResult = await signInAnonymously(auth);
+          customUser = {
+            ...anonResult.user,
+            email: resolvedEmail,
+            displayName: resolvedName,
+          } as unknown as User;
+        } catch (anonErr) {
+          console.warn("signInAnonymously fallback to local session user:", anonErr);
+          customUser = {
+            uid: `jfn_${resolvedName}_${Date.now()}`,
+            email: resolvedEmail,
+            displayName: resolvedName,
+          } as unknown as User;
+        }
+
+        try {
+          await saveUserUniversityVerification(
+            customUser,
+            JAFFNA_UNIVERSITY,
+            resolvedEmail.split("@")[1] || "univ.jfn.ac.lk"
+          );
+          await registerUser(customUser);
+        } catch (dbErr) {
+          console.warn("User registration sync warning:", dbErr);
+        }
         setUser(customUser);
         setProfileReady(true);
         setAuthOpen(false);
@@ -398,6 +476,14 @@ export default function App() {
           result.user,
           JAFFNA_UNIVERSITY,
           email.split("@")[1] || "univ.jfn.ac.lk"
+        );
+        await safeStorage.setItem(
+          "@campus_user_session",
+          JSON.stringify({
+            email: result.user.email,
+            displayName: result.user.displayName || result.user.email?.split("@")[0],
+            uid: result.user.uid,
+          })
         );
         await registerUser(result.user);
         setUser(result.user);
@@ -501,6 +587,17 @@ export default function App() {
     setTab("Messages");
   };
 
+  const handleSignOut = async () => {
+    try {
+      await safeStorage.removeItem("@campus_user_session");
+      if (auth) await signOut(auth);
+      setUser(null);
+      setProfileReady(false);
+    } catch (e) {
+      console.warn("Sign out error:", e);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="dark" />
@@ -521,6 +618,7 @@ export default function App() {
           onProfile={() => setTab("Profile")}
           onOpenRentRequests={() => setRentRequestsOpen(true)}
           onOpenMyPosts={() => (user ? setTab("MyListings") : openAuth())}
+          incomingRentCount={incomingRequestsCount}
         />
       )}
       {tab === "Saved" && (
@@ -561,13 +659,14 @@ export default function App() {
           onMyListings={() => (user ? setTab("MyListings") : openAuth())}
           onSaved={() => setTab("Saved")}
           onSignIn={openAuth}
-          onSignOut={() => auth && signOut(auth)}
+          onSignOut={handleSignOut}
         />
       )}
       <BottomNav
         tab={tab}
         savedCount={savedIds.length}
         listingCount={myListings.length}
+        incomingRequestsCount={incomingRequestsCount}
         onChange={setTab}
         onSell={() => setSellOpen(true)}
       />
@@ -618,12 +717,14 @@ function BottomNav({
   tab,
   savedCount,
   listingCount,
+  incomingRequestsCount,
   onChange,
   onSell,
 }: {
   tab: Tab;
   savedCount: number;
   listingCount: number;
+  incomingRequestsCount?: number;
   onChange: (tab: Tab) => void;
   onSell: () => void;
 }) {
@@ -653,6 +754,7 @@ function BottomNav({
         label="Messages"
         icon="💬"
         active={tab === "Messages"}
+        badge={incomingRequestsCount && incomingRequestsCount > 0 ? incomingRequestsCount : undefined}
         onPress={() => onChange("Messages")}
       />
       <Pressable style={styles.sellButton} onPress={onSell}>
@@ -702,6 +804,17 @@ function ListingModal({
   onContact: () => void;
   onRentBorrow: () => void;
 }) {
+  const isOwner = Boolean(
+    user &&
+    item && (
+      (user.uid && item.sellerId && user.uid === item.sellerId) ||
+      (user.email && item.sellerEmail && user.email.trim().toLowerCase() === item.sellerEmail.trim().toLowerCase()) ||
+      (user.displayName && item.seller && user.displayName.trim().toLowerCase() === item.seller.trim().toLowerCase()) ||
+      (user.email && item.seller && user.email.split("@")[0].toLowerCase() === item.seller.trim().toLowerCase()) ||
+      (user.email && item.sellerEmail && user.email.split("@")[0].toLowerCase() === item.sellerEmail.split("@")[0].toLowerCase())
+    )
+  );
+
   return (
     <Modal
       visible={item !== null}
@@ -734,26 +847,38 @@ function ListingModal({
                 </View>
                 <Text style={styles.description}>{item.description}</Text>
 
-                {/* Member 1: Rent or Borrow Action */}
-                <Pressable
-                  style={styles.rentBorrowBtn}
-                  onPress={user ? onRentBorrow : onContact}
-                >
-                  <Text style={styles.rentBorrowBtnText}>
-                    {user
-                      ? "🤝 Request Rent or Borrow"
-                      : "Sign in to rent or borrow"}
-                  </Text>
-                </Pressable>
+                {/* Actions: Disabled for own listing, active for others */}
+                {isOwner ? (
+                  <View style={styles.ownListingBanner}>
+                    <Text style={styles.ownListingBadge}>📦 Your Post</Text>
+                    <Text style={styles.ownListingText}>
+                      You posted this item. You cannot request to rent or borrow your own item.
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    {/* Member 1: Rent or Borrow Action */}
+                    <Pressable
+                      style={styles.rentBorrowBtn}
+                      onPress={user ? onRentBorrow : onContact}
+                    >
+                      <Text style={styles.rentBorrowBtnText}>
+                        {user
+                          ? "🤝 Request Rent or Borrow"
+                          : "Sign in to rent or borrow"}
+                      </Text>
+                    </Pressable>
 
-                {/* Message Seller Action */}
-                <Pressable style={styles.primary} onPress={onContact}>
-                  <Text style={styles.primaryText}>
-                    {user
-                      ? `Message ${item.seller}`
-                      : "Sign in to contact seller"}
-                  </Text>
-                </Pressable>
+                    {/* Message Seller Action */}
+                    <Pressable style={styles.primary} onPress={onContact}>
+                      <Text style={styles.primaryText}>
+                        {user
+                          ? `Message ${item.seller}`
+                          : "Sign in to contact seller"}
+                      </Text>
+                    </Pressable>
+                  </>
+                )}
 
                 {/* Member 3: Buyer-Verified Condition Rating */}
                 <ConditionReviewsSection
@@ -1279,6 +1404,27 @@ const styles = StyleSheet.create({
     color: "#1C7057",
     fontWeight: "800",
     fontSize: 14,
+  },
+  ownListingBanner: {
+    backgroundColor: "#F2F8F5",
+    borderWidth: 1,
+    borderColor: "#CCE5DA",
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 14,
+    alignItems: "center",
+  },
+  ownListingBadge: {
+    color: "#165943",
+    fontWeight: "800",
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  ownListingText: {
+    color: "#4A6B5F",
+    fontSize: 12.5,
+    textAlign: "center",
+    lineHeight: 17,
   },
   primary: {
     height: 50,

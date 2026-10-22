@@ -39,7 +39,21 @@ export function RentBorrowModal({
 
   if (!item) return null;
 
+  const isOwner = Boolean(
+    item && (
+      (currentUserId && item.sellerId && currentUserId === item.sellerId) ||
+      (currentUserEmail && item.sellerEmail && currentUserEmail.trim().toLowerCase() === item.sellerEmail.trim().toLowerCase()) ||
+      (currentUserName && item.seller && currentUserName.trim().toLowerCase() === item.seller.trim().toLowerCase()) ||
+      (currentUserEmail && item.seller && currentUserEmail.split("@")[0].toLowerCase() === item.seller.trim().toLowerCase()) ||
+      (currentUserEmail && item.sellerEmail && currentUserEmail.split("@")[0].toLowerCase() === item.sellerEmail.split("@")[0].toLowerCase())
+    )
+  );
+
   const handleSubmit = async () => {
+    if (isOwner) {
+      setError("You cannot send a borrow or rent request to your own listing.");
+      return;
+    }
     if (!duration.trim()) {
       setError("Please enter the duration (e.g. 3 days, 1 week).");
       return;
@@ -114,6 +128,15 @@ export function RentBorrowModal({
               </Text>
               <Text style={styles.sellerSubtitle}>Seller: {item.seller}</Text>
 
+              {isOwner ? (
+                <View style={styles.ownerWarningCard}>
+                  <Text style={styles.ownerWarningTitle}>📦 Your Own Listing</Text>
+                  <Text style={styles.ownerWarningText}>
+                    You cannot request to borrow or rent an item that was posted by your own account.
+                  </Text>
+                </View>
+              ) : null}
+
               {/* Type Switcher */}
               <View style={styles.typeSelector}>
                 <Pressable
@@ -178,15 +201,17 @@ export function RentBorrowModal({
               {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
               <Pressable
-                style={[styles.primaryButton, loading && styles.disabledButton]}
+                style={[styles.primaryButton, (loading || isOwner) && styles.disabledButton]}
                 onPress={handleSubmit}
-                disabled={loading}
+                disabled={loading || isOwner}
               >
                 {loading ? (
                   <ActivityIndicator color="#FFF" />
                 ) : (
                   <Text style={styles.primaryButtonText}>
-                    Send {requestType === "rent" ? "Rent" : "Borrow"} Request
+                    {isOwner
+                      ? "Cannot Request Own Post"
+                      : `Send ${requestType === "rent" ? "Rent" : "Borrow"} Request`}
                   </Text>
                 )}
               </Pressable>
@@ -316,6 +341,25 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.6,
+  },
+  ownerWarningCard: {
+    backgroundColor: "#FFF3DC",
+    borderWidth: 1,
+    borderColor: "#FBD38D",
+    borderRadius: 12,
+    padding: 12,
+    marginVertical: 10,
+  },
+  ownerWarningTitle: {
+    color: "#B25E09",
+    fontWeight: "800",
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  ownerWarningText: {
+    color: "#744210",
+    fontSize: 12,
+    lineHeight: 16,
   },
   primaryButtonText: {
     color: "#FFF",

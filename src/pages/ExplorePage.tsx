@@ -31,6 +31,7 @@ export function ExplorePage({
   onProfile,
   onOpenRentRequests,
   onOpenMyPosts,
+  incomingRentCount,
 }: {
   user?: User | null;
   onSignIn?: () => void;
@@ -47,6 +48,7 @@ export function ExplorePage({
   onProfile: () => void;
   onOpenRentRequests?: () => void;
   onOpenMyPosts?: () => void;
+  incomingRentCount?: number;
 }) {
   const userName =
     user?.displayName || user?.email?.split("@")[0] || "Student";
@@ -70,6 +72,11 @@ export function ExplorePage({
               <Pressable style={styles.rentReqBtn} onPress={onOpenRentRequests}>
                 <Text style={styles.rentReqIcon}>🤝</Text>
                 <Text style={styles.rentReqText}>Rent</Text>
+                {incomingRentCount && incomingRentCount > 0 ? (
+                  <View style={styles.rentReqBadge}>
+                    <Text style={styles.rentReqBadgeText}>{incomingRentCount}</Text>
+                  </View>
+                ) : null}
               </Pressable>
             )}
 
@@ -345,6 +352,21 @@ const styles = StyleSheet.create({
     color: "#134638",
     fontSize: 12,
     fontWeight: "700",
+  },
+  rentReqBadge: {
+    backgroundColor: "#C53B3B",
+    borderRadius: 9,
+    minWidth: 17,
+    height: 17,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 4,
+    marginLeft: 2,
+  },
+  rentReqBadgeText: {
+    color: "#FFF",
+    fontSize: 10,
+    fontWeight: "800",
   },
   myPostsBtn: {
     flexDirection: "row",

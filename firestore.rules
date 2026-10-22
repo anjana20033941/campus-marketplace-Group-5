@@ -32,8 +32,13 @@ service cloud.firestore {
     }
 
     match /rentRequests/{requestId} {
-      allow read: if signedIn() && (request.auth.uid == resource.data.sellerId || request.auth.uid == resource.data.requesterId);
-      allow create: if signedIn() && request.resource.data.requesterId == request.auth.uid && isUniversityVerified();
+      allow read: if signedIn() && (
+        request.auth.uid == resource.data.sellerId ||
+        request.auth.uid == resource.data.requesterId ||
+        (resource.data.sellerEmail != "" && request.auth.token.email == resource.data.sellerEmail) ||
+        (resource.data.requesterEmail != "" && request.auth.token.email == resource.data.requesterEmail)
+      );
+      allow create: if signedIn();
       allow update: if signedIn() && (request.auth.uid == resource.data.sellerId || request.auth.uid == resource.data.requesterId);
     }
   }

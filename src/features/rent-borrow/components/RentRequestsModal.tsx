@@ -129,6 +129,7 @@ export function RentRequestsModal({
 
                   <Text style={styles.requester}>
                     From: <Text style={styles.bold}>{item.requesterName}</Text>
+                    {item.requesterEmail ? ` (${item.requesterEmail})` : ""}
                   </Text>
                   <Text style={styles.meta}>
                     Duration: <Text style={styles.bold}>{item.duration}</Text>
