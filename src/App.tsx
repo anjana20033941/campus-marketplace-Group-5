@@ -30,6 +30,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import safeStorage from "./utils/safeStorage";
 import { extractGoogleProfile } from "./utils/googleAuth";
+import { authenticateStudentWithPassword } from "./services/studentAuthService";
 import {
   Alert,
   Image,
@@ -164,7 +165,9 @@ export default function App() {
     clientId: googleClientId,
     webClientId: googleClientId,
     scopes: ["openid", "profile", "email"],
-    responseType: "id_token",
+    extraParams: {
+      prompt: "select_account",
+    },
   });
 
   const isAuthProcessingRef = useRef(false);
@@ -453,6 +456,63 @@ export default function App() {
     setAuthOpen(true);
   };
 
+  const handleStudentPasswordAuth = async (
+    email: string,
+    pass: string,
+    isRegister: boolean
+  ) => {
+    setAuthError("");
+    const res = await authenticateStudentWithPassword(email, pass, isRegister);
+    if (!res.success || !res.user) {
+      setAuthError(res.error || "Authentication failed.");
+      return;
+    }
+
+    const student = res.user;
+
+    // Ensure Firebase user session exists for Firestore security rules
+    let activeUser = auth?.currentUser;
+    if (!activeUser && auth) {
+      try {
+        const anon = await signInAnonymously(auth);
+        activeUser = anon.user;
+      } catch (err) {
+        console.warn("signInAnonymously warning:", err);
+      }
+    }
+
+    const finalUser = {
+      ...(activeUser || { uid: student.uid }),
+      email: student.email,
+      displayName: student.displayName,
+    } as unknown as User;
+
+    try {
+      await saveUserUniversityVerification(
+        finalUser,
+        JAFFNA_UNIVERSITY,
+        student.email.split("@")[1] || "univ.jfn.ac.lk"
+      );
+      await registerUser(finalUser);
+    } catch (e) {
+      console.warn("User register warning:", e);
+    }
+
+    await safeStorage.setItem(
+      "@campus_user_session",
+      JSON.stringify({
+        email: student.email,
+        displayName: student.displayName,
+        uid: finalUser.uid,
+      })
+    );
+
+    setUser(finalUser);
+    setProfileReady(true);
+    setAuthOpen(false);
+    setAuthError("");
+  };
+
   const signInWithGoogle = async () => {
     if (!auth) return;
     setAuthError("");
@@ -698,7 +758,8 @@ export default function App() {
       <AuthModal
         visible={authOpen}
         onClose={() => setAuthOpen(false)}
-        onSignIn={signInWithGoogle}
+        onSignInWithPassword={handleStudentPasswordAuth}
+        onSignInWithGoogle={signInWithGoogle}
         error={authError}
       />
       <SellModal
@@ -899,34 +960,71 @@ function ListingModal({
 function AuthModal({
   visible,
   onClose,
-  onSignIn,
+  onSignInWithPassword,
+  onSignInWithGoogle,
   error,
 }: {
   visible: boolean;
   onClose: () => void;
-  onSignIn: () => Promise<void>;
+  onSignInWithPassword: (
+    email: string,
+    pass: string,
+    isRegister: boolean
+  ) => Promise<void>;
+  onSignInWithGoogle: () => Promise<void>;
   error: string;
 }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [isRegister, setIsRegister] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!email.trim() || !password.trim()) {
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onSignInWithPassword(email.trim(), password.trim(), isRegister);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <View style={styles.authDialog}>
           {/* Header */}
           <View style={styles.googleDialogHeader}>
-            <Text style={styles.googleMarkBig}>G</Text>
+            <Text style={styles.googleMarkBig}>🎓</Text>
             <View style={{ flex: 1 }}>
               <Text style={styles.googleDialogTitle}>University of Jaffna</Text>
               <Text style={styles.googleDialogSubtitle}>
-                Sign in with your official university Google account
+                Protected Student Marketplace Login
               </Text>
             </View>
           </View>
 
-          {/* Security Notice */}
-          <View style={styles.authSecurityNotice}>
-            <Text style={styles.authSecurityNoticeText}>
-              🔒 Secure authentication via Google Workspace. Requires your university account password.
-            </Text>
+          {/* Mode Switcher */}
+          <View style={styles.authTabRow}>
+            <Pressable
+              style={[styles.authTabBtn, !isRegister && styles.authTabBtnActive]}
+              onPress={() => setIsRegister(false)}
+            >
+              <Text style={[styles.authTabBtnText, !isRegister && styles.authTabBtnTextActive]}>
+                Sign In
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.authTabBtn, isRegister && styles.authTabBtnActive]}
+              onPress={() => setIsRegister(true)}
+            >
+              <Text style={[styles.authTabBtnText, isRegister && styles.authTabBtnTextActive]}>
+                Set Password
+              </Text>
+            </Pressable>
           </View>
 
           {/* Error Banner */}
@@ -936,13 +1034,81 @@ function AuthModal({
             </View>
           ) : null}
 
-          {/* Real Google Account Sign-In Button */}
+          {/* Email input */}
+          <View style={styles.authFieldGroup}>
+            <Text style={styles.authFieldLabel}>University Email:</Text>
+            <TextInput
+              value={email}
+              onChangeText={setEmail}
+              placeholder="e.g. 2023csc051@univ.jfn.ac.lk"
+              placeholderTextColor="#8C9C92"
+              style={styles.authTextInput}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+
+          {/* Password input */}
+          <View style={styles.authFieldGroup}>
+            <Text style={styles.authFieldLabel}>
+              {isRegister ? "Create Account Password (min 6 chars):" : "Account Password:"}
+            </Text>
+            <View style={styles.passwordInputContainer}>
+              <TextInput
+                value={password}
+                onChangeText={setPassword}
+                placeholder={isRegister ? "Create a secret password" : "Enter your account password"}
+                placeholderTextColor="#8C9C92"
+                style={styles.passwordInputField}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <Pressable
+                style={styles.showPassBtn}
+                onPress={() => setShowPassword(!showPassword)}
+              >
+                <Text style={styles.showPassIcon}>{showPassword ? "👁️" : "🙈"}</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          {/* Submit Button */}
           <Pressable
-            style={styles.realGoogleButton}
-            onPress={() => onSignIn()}
+            style={[styles.authSubmitButton, submitting && { opacity: 0.7 }]}
+            onPress={handleSubmit}
+            disabled={submitting}
           >
-            <Text style={styles.googleMarkButton}>G</Text>
-            <Text style={styles.realGoogleButtonText}>Continue with Google</Text>
+            <Text style={styles.authSubmitButtonText}>
+              {submitting
+                ? "Verifying..."
+                : isRegister
+                ? "✨ Set Password & Register"
+                : "🔒 Sign In with Password"}
+            </Text>
+          </Pressable>
+
+          <View style={styles.authSecurityFootnote}>
+            <Text style={styles.authSecurityFootnoteText}>
+              🛡️ Password-protected. Nobody can sign into your account without your password.
+            </Text>
+          </View>
+
+          {/* Or Divider */}
+          <View style={styles.dividerRow}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>or</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          {/* Google Account Sign-In Button */}
+          <Pressable
+            style={styles.googleOutlineButton}
+            onPress={onSignInWithGoogle}
+          >
+            <Text style={styles.googleMarkButtonDark}>G</Text>
+            <Text style={styles.googleOutlineButtonText}>Continue with Google</Text>
           </Pressable>
 
           <Pressable style={styles.cancelOutline} onPress={onClose}>
@@ -1478,21 +1644,146 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800",
   },
-  authSecurityNotice: {
-    backgroundColor: "#F2F7F4",
+  authTabRow: {
+    flexDirection: "row",
+    backgroundColor: "#EDF4F0",
     borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    padding: 3,
     marginTop: 14,
-    borderWidth: 1,
-    borderColor: "#D9E9DF",
+    marginBottom: 8,
   },
-  authSecurityNoticeText: {
-    color: "#2C5B4E",
+  authTabBtn: {
+    flex: 1,
+    paddingVertical: 7,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+  },
+  authTabBtnActive: {
+    backgroundColor: "#FFF",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  authTabBtnText: {
+    fontSize: 12.5,
+    fontWeight: "700",
+    color: "#6D8177",
+  },
+  authTabBtnTextActive: {
+    color: "#103C31",
+    fontWeight: "800",
+  },
+  authFieldGroup: {
+    marginTop: 8,
+    gap: 4,
+  },
+  authFieldLabel: {
     fontSize: 11.5,
-    lineHeight: 16,
+    fontWeight: "700",
+    color: "#1C4E40",
+  },
+  authTextInput: {
+    height: 42,
+    borderWidth: 1,
+    borderColor: "#CCE0D5",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    fontSize: 13,
+    color: "#103C31",
+    backgroundColor: "#F8FAF8",
+  },
+  passwordInputContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#CCE0D5",
+    borderRadius: 12,
+    backgroundColor: "#F8FAF8",
+    height: 42,
+    paddingLeft: 12,
+  },
+  passwordInputField: {
+    flex: 1,
+    height: 42,
+    fontSize: 13,
+    color: "#103C31",
+  },
+  showPassBtn: {
+    paddingHorizontal: 12,
+    height: 42,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  showPassIcon: {
+    fontSize: 14,
+  },
+  authSubmitButton: {
+    height: 46,
+    backgroundColor: "#103C31",
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  authSubmitButtonText: {
+    color: "#FFF",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  authSecurityFootnote: {
+    marginTop: 6,
+    alignItems: "center",
+  },
+  authSecurityFootnoteText: {
+    fontSize: 10.5,
+    color: "#617A6F",
     textAlign: "center",
+    lineHeight: 14,
+  },
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 10,
+    gap: 10,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "#E4EDE7",
+  },
+  dividerText: {
+    color: "#8B9E93",
+    fontSize: 11,
     fontWeight: "600",
+  },
+  googleOutlineButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFF",
+    borderWidth: 1.5,
+    borderColor: "#D2E2D8",
+    height: 44,
+    borderRadius: 14,
+    gap: 10,
+  },
+  googleMarkButtonDark: {
+    color: "#4285F4",
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  googleOutlineButtonText: {
+    color: "#164438",
+    fontSize: 13.5,
+    fontWeight: "700",
   },
   cancelOutline: {
     height: 44,
