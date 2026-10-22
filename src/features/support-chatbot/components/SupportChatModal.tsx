@@ -1,4 +1,5 @@
-import { Modal, SafeAreaView, StyleSheet } from "react-native";
+import { Modal, StyleSheet } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { SupportChatScreen } from "./SupportChatScreen";
 
 export function SupportChatModal({
