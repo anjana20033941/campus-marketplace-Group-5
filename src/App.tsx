@@ -453,71 +453,11 @@ export default function App() {
     setAuthOpen(true);
   };
 
-  const signInWithGoogle = async (enteredEmail?: string) => {
+  const signInWithGoogle = async () => {
     if (!auth) return;
     setAuthError("");
 
-    // If manual Jaffna email was provided
-    if (enteredEmail && enteredEmail.trim()) {
-      const inputTrimmed = enteredEmail.trim().toLowerCase();
-
-      // Strict domain verification: reject non-Jaffna domain immediately
-      if (!isJaffnaEmail(inputTrimmed)) {
-        setAuthError("Try with university email account");
-        Alert.alert("Access Denied", "Try with university email account");
-        return;
-      }
-
-      const resolvedEmail = inputTrimmed;
-      const resolvedName = resolvedEmail.split("@")[0];
-
-      try {
-        await safeStorage.setItem(
-          "@campus_user_session",
-          JSON.stringify({
-            email: resolvedEmail,
-            displayName: resolvedName,
-          })
-        );
-        let customUser: User;
-        try {
-          const anonResult = await signInAnonymously(auth);
-          customUser = {
-            ...anonResult.user,
-            email: resolvedEmail,
-            displayName: resolvedName,
-          } as unknown as User;
-        } catch (anonErr) {
-          console.warn("signInAnonymously fallback to local session user:", anonErr);
-          customUser = {
-            uid: `jfn_${resolvedName}_${Date.now()}`,
-            email: resolvedEmail,
-            displayName: resolvedName,
-          } as unknown as User;
-        }
-
-        try {
-          await saveUserUniversityVerification(
-            customUser,
-            JAFFNA_UNIVERSITY,
-            resolvedEmail.split("@")[1] || "univ.jfn.ac.lk"
-          );
-          await registerUser(customUser);
-        } catch (dbErr) {
-          console.warn("User registration sync warning:", dbErr);
-        }
-        setUser(customUser);
-        setProfileReady(true);
-        setAuthOpen(false);
-        return;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Failed to sign in";
-        setAuthError(msg);
-        return;
-      }
-    }
-
-    // Real Google OAuth trigger
+    // Real Google OAuth trigger with university password verification
     try {
       if (Platform.OS === "web") {
         try {
@@ -964,12 +904,9 @@ function AuthModal({
 }: {
   visible: boolean;
   onClose: () => void;
-  onSignIn: (email?: string) => Promise<void>;
+  onSignIn: () => Promise<void>;
   error: string;
 }) {
-  const [manualOpen, setManualOpen] = useState(false);
-  const [manualEmail, setManualEmail] = useState("");
-
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
@@ -983,6 +920,13 @@ function AuthModal({
                 Sign in with your official university Google account
               </Text>
             </View>
+          </View>
+
+          {/* Security Notice */}
+          <View style={styles.authSecurityNotice}>
+            <Text style={styles.authSecurityNoticeText}>
+              🔒 Secure authentication via Google Workspace. Requires your university account password.
+            </Text>
           </View>
 
           {/* Error Banner */}
@@ -1000,44 +944,6 @@ function AuthModal({
             <Text style={styles.googleMarkButton}>G</Text>
             <Text style={styles.realGoogleButtonText}>Continue with Google</Text>
           </Pressable>
-
-          {/* Or Divider */}
-          <View style={styles.dividerRow}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          {/* Alternative direct entry */}
-          {!manualOpen ? (
-            <Pressable
-              style={styles.manualToggleBtn}
-              onPress={() => setManualOpen(true)}
-            >
-              <Text style={styles.manualToggleText}>
-                ✍️ Enter Jaffna Student Email (@univ.jfn.ac.lk)
-              </Text>
-            </Pressable>
-          ) : (
-            <View style={styles.manualInputWrapper}>
-              <Text style={styles.manualInputLabel}>University Google Email:</Text>
-              <TextInput
-                value={manualEmail}
-                onChangeText={setManualEmail}
-                placeholder="e.g. 2023csc068@univ.jfn.ac.lk"
-                placeholderTextColor="#8C9C92"
-                style={styles.manualInputField}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-              <Pressable
-                style={styles.manualSubmitBtn}
-                onPress={() => manualEmail.trim() && onSignIn(manualEmail.trim())}
-              >
-                <Text style={styles.manualSubmitText}>Verify & Sign In</Text>
-              </Pressable>
-            </View>
-          )}
 
           <Pressable style={styles.cancelOutline} onPress={onClose}>
             <Text style={styles.cancelOutlineText}>Cancel</Text>
@@ -1572,66 +1478,21 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800",
   },
-  dividerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginVertical: 14,
-    gap: 10,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: "#E4EDE7",
-  },
-  dividerText: {
-    color: "#8B9E93",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  manualToggleBtn: {
-    paddingVertical: 11,
-    alignItems: "center",
-    justifyContent: "center",
+  authSecurityNotice: {
     backgroundColor: "#F2F7F4",
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#D6E5DC",
-  },
-  manualToggleText: {
-    color: "#164E3F",
-    fontSize: 12.5,
-    fontWeight: "700",
-  },
-  manualInputWrapper: {
-    gap: 8,
-  },
-  manualInputLabel: {
-    color: "#173C34",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  manualInputField: {
-    height: 46,
-    borderWidth: 1,
-    borderColor: "#C5D8CD",
-    borderRadius: 12,
+    paddingVertical: 10,
     paddingHorizontal: 12,
-    fontSize: 13,
-    color: "#173C34",
-    backgroundColor: "#FFF",
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: "#D9E9DF",
   },
-  manualSubmitBtn: {
-    height: 44,
-    backgroundColor: "#185A46",
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 2,
-  },
-  manualSubmitText: {
-    color: "#FFF",
-    fontSize: 13,
-    fontWeight: "800",
+  authSecurityNoticeText: {
+    color: "#2C5B4E",
+    fontSize: 11.5,
+    lineHeight: 16,
+    textAlign: "center",
+    fontWeight: "600",
   },
   cancelOutline: {
     height: 44,
