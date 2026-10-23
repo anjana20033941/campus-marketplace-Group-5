@@ -53,6 +53,8 @@ LogBox.ignoreLogs([
   "SafeAreaView has been deprecated",
   "Missing or insufficient permissions",
   "Could not query rentRequests",
+  "Cannot connect to Expo CLI",
+  "Cross-Site request verification failed",
 ]);
 import { EmptyState } from "./components/EmptyState";
 import { ExplorePage } from "./pages/ExplorePage";
@@ -283,11 +285,20 @@ export default function App() {
     }
   };
 
+  const formatAuthError = (err?: string) => {
+    if (!err) return "";
+    if (/cross-site|state mismatch|state do not match|cached state/i.test(err)) {
+      return "Google Sign-In was blocked by Google (Error 400). Please sign in using your university email and password below.";
+    }
+    return err;
+  };
+
   useEffect(() => {
     if (response?.type === "success") {
       handleGoogleAuthResponse(response);
     } else if (response?.type === "error") {
-      setAuthError(response.error?.message || "Google sign-in was not completed.");
+      const msg = response.error?.message || "";
+      setAuthError(formatAuthError(msg));
     }
   }, [response]);
 
@@ -562,8 +573,9 @@ export default function App() {
           if (res?.type === "success") {
             await handleGoogleAuthResponse(res);
           } else if (res?.type === "error") {
+            const msg = res.error?.message || "";
             setAuthError(
-              res.error?.message || "Google sign-in was cancelled or encountered an error."
+              formatAuthError(msg) || "Google sign-in was cancelled or encountered an error."
             );
           }
         }
